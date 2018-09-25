@@ -7,6 +7,8 @@
 
 package com.facebook.react.modules.websocket;
 
+import android.util.Log;
+
 import com.facebook.common.logging.FLog;
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.ReactApplicationContext;
@@ -22,15 +24,25 @@ import com.facebook.react.common.ReactConstants;
 import com.facebook.react.module.annotations.ReactModule;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
 import com.facebook.react.modules.network.ForwardingCookieHandler;
+import com.facebook.react.modules.network.OkHttpClientProvider;
+
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.security.cert.CertificateException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.Nullable;
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSession;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
+
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -78,17 +90,57 @@ public final class WebSocketModule extends ReactContextBaseJavaModule {
     }
   }
 
+  private void setSSLSocketFactory(OkHttpClient.Builder builder) {
+    final TrustManager[] trustAllCerts = new TrustManager[] {
+            new X509TrustManager() {
+              @Override
+              public void checkClientTrusted(java.security.cert.X509Certificate[] chain, String authType) throws CertificateException {
+                Log.d("MAINAP PLICATION", "checkClientTrusted: ");
+              }
+
+              @Override
+              public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) throws CertificateException {
+                Log.d("MAINAPPLICATION", "checkServerTrusted: ");
+              }
+
+              @Override
+              public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+                Log.d("MAINAPPLICATION", "getAcceptedIssuers: ");
+                return new java.security.cert.X509Certificate[]{};
+              }
+            }
+    };
+
+    // Install the all-trusting trust manager
+    try {
+      final SSLContext sslContext = SSLContext.getInstance("SSL");
+      sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
+      final SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
+      builder.sslSocketFactory(sslSocketFactory, (X509TrustManager)trustAllCerts[0]);
+      builder.hostnameVerifier(new HostnameVerifier() {
+        @Override
+        public boolean verify(String hostname, SSLSession session) {
+          return true;
+        }
+      });
+
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+  }
+
   @ReactMethod
   public void connect(
     final String url,
     @Nullable final ReadableArray protocols,
     @Nullable final ReadableMap options,
     final int id) {
-    OkHttpClient client = new OkHttpClient.Builder()
+      OkHttpClient.Builder b = new OkHttpClient.Builder()
       .connectTimeout(10, TimeUnit.SECONDS)
       .writeTimeout(10, TimeUnit.SECONDS)
-      .readTimeout(0, TimeUnit.MINUTES) // Disable timeouts for read
-      .build();
+      .readTimeout(0, TimeUnit.MINUTES); // Disable timeouts for read
+    setSSLSocketFactory(b);
+    OkHttpClient client = b.build();
 
     Request.Builder builder = new Request.Builder().tag(id).url(url);
 
